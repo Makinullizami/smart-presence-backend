@@ -23,6 +23,10 @@ class User extends Authenticatable
         'email',
         'password',
         'role',
+        'nim',
+        'faculty',
+        'major',
+        'photo',
     ];
 
     /**
@@ -46,5 +50,13 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    /**
+     * Get the classes that the student has joined
+     */
+    public function classes()
+    {
+        return $this->belongsToMany(ClassRoom::class, 'class_students', 'student_id', 'class_room_id');
     }
 }

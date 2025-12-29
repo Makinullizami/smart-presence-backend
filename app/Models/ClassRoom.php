@@ -11,6 +11,7 @@ class ClassRoom extends Model
 
     protected $fillable = [
         'name',
+        'code',
         'description',
         'teacher_id',
     ];
@@ -28,5 +29,25 @@ class ClassRoom extends Model
     public function schedules()
     {
         return $this->hasMany(Schedule::class);
+    }
+
+    public function materials()
+    {
+        return $this->hasMany(Material::class);
+    }
+
+    public function assignments()
+    {
+        return $this->hasMany(Assignment::class);
+    }
+
+    public function sessions()
+    {
+        return $this->hasMany(ClassSession::class);
+    }
+
+    public function attendances()
+    {
+        return $this->hasManyThrough(Attendance::class, ClassSession::class);
     }
 }

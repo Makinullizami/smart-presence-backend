@@ -12,12 +12,15 @@ class Attendance extends Model
     protected $fillable = [
         'user_id',
         'schedule_id',
+        'class_session_id', // Added
         'check_in_time',
         'check_out_time',
         'status',
         'method',
         'location_lat',
         'location_long',
+        'notes', // Added
+        'attachment', // Added
     ];
 
     public function user()
@@ -28,5 +31,10 @@ class Attendance extends Model
     public function schedule()
     {
         return $this->belongsTo(Schedule::class);
+    }
+
+    public function classSession()
+    {
+        return $this->belongsTo(ClassSession::class);
     }
 }

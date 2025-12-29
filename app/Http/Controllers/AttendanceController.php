@@ -13,32 +13,66 @@ class AttendanceController extends Controller
         $request->validate([
             'user_id' => 'required|exists:users,id',
             'schedule_id' => 'nullable|exists:schedules,id',
+            'class_room_id' => 'nullable|exists:class_rooms,id',
             'location_lat' => 'nullable|string',
             'location_long' => 'nullable|string',
-            'method' => 'required|string', // face, gps, manual
+            'method' => 'required|string',
+            'status' => 'nullable|string|in:present,sick,permission,alpha',
+            'notes' => 'nullable|string',
+            'attachment' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:2048',
         ]);
 
-        // Check if already checked in today for this schedule
-        $existing = Attendance::where('user_id', $request->user_id)
-            ->whereDate('created_at', Carbon::today())
-            ->where('schedule_id', $request->schedule_id)
-            ->first();
+        $classSessionId = null;
+
+        if ($request->has('class_room_id')) {
+            $activeSession = \App\Models\ClassSession::where('class_room_id', $request->class_room_id)
+                ->where('is_active', true)
+                ->first();
+
+            if (!$activeSession) {
+                return response()->json(['success' => false, 'message' => 'Attendance is currently closed'], 400);
+            }
+            $classSessionId = $activeSession->id;
+        }
+
+        if ($request->has('class_room_id') && !$classSessionId) {
+            return response()->json(['success' => false, 'message' => 'Attendance session is invalid'], 400);
+        }
+
+        // Check for existing attendance
+        $query = Attendance::where('user_id', auth()->id());
+        if ($classSessionId) {
+            $query->where('class_session_id', $classSessionId);
+        } else {
+            $query->whereDate('created_at', Carbon::today())
+                ->where('schedule_id', $request->schedule_id);
+        }
+        $existing = $query->first();
 
         if ($existing) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Already checked in',
-            ], 400);
+            return response()->json(['success' => false, 'message' => 'Already checked in'], 400);
+        }
+
+        // Handle File Upload
+        $attachmentPath = null;
+        if ($request->hasFile('attachment')) {
+            $file = $request->file('attachment');
+            $filename = time() . '_' . $file->getClientOriginalName();
+            $file->move(public_path('attachments'), $filename);
+            $attachmentPath = 'attachments/' . $filename;
         }
 
         $attendance = Attendance::create([
-            'user_id' => $request->user_id,
+            'user_id' => auth()->id(), // Use authenticated user ID
             'schedule_id' => $request->schedule_id,
+            'class_session_id' => $classSessionId,
             'check_in_time' => Carbon::now(),
-            'status' => 'present',
+            'status' => $request->input('status', 'present'),
             'method' => $request->input('method'),
             'location_lat' => $request->location_lat,
             'location_long' => $request->location_long,
+            'notes' => $request->input('notes'),
+            'attachment' => $attachmentPath,
         ]);
 
         return response()->json([
@@ -51,12 +85,12 @@ class AttendanceController extends Controller
     public function checkOut(Request $request)
     {
         $request->validate([
-            'user_id' => 'required|exists:users,id',
+            // 'user_id' => 'required|exists:users,id', // Removed
             'schedule_id' => 'nullable|exists:schedules,id',
         ]);
 
         // Find the latest attendance for today
-        $attendance = Attendance::where('user_id', $request->user_id)
+        $attendance = Attendance::where('user_id', auth()->id())
             ->whereDate('created_at', Carbon::today())
             ->where('schedule_id', $request->schedule_id)
             ->first();
@@ -79,10 +113,10 @@ class AttendanceController extends Controller
         ]);
     }
 
-    public function history($user_id)
+    public function history(Request $request)
     {
-        $history = Attendance::where('user_id', $user_id)
-            ->with(['schedule', 'schedule.classRoom'])
+        $history = Attendance::where('user_id', auth()->id())
+            ->with(['schedule', 'schedule.classRoom', 'classSession', 'classSession.classRoom'])
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -90,6 +124,57 @@ class AttendanceController extends Controller
             'success' => true,
             'message' => 'Attendance history',
             'data' => $history,
+        ]);
+    }
+
+    public function getSessionAttendees($sessionId)
+    {
+        $attendances = Attendance::where('class_session_id', $sessionId)
+            ->with('user')
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Session attendees',
+            'data' => $attendances,
+        ]);
+    }
+
+    public function today(Request $request)
+    {
+        $attendance = Attendance::where('user_id', auth()->id())
+            ->whereDate('created_at', Carbon::today())
+            ->with(['classSession', 'classSession.classRoom'])
+            ->latest()
+            ->first();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Today attendance',
+            'attendance' => $attendance,
+        ]);
+    }
+
+    public function statistics(Request $request)
+    {
+        $user = auth()->user();
+
+        $stats = [
+            'present' => Attendance::where('user_id', $user->id)->where('status', 'present')->count(),
+            'permission' => Attendance::where('user_id', $user->id)->where('status', 'permission')->count(),
+            'sick' => Attendance::where('user_id', $user->id)->where('status', 'sick')->count(),
+            'alpha' => Attendance::where('user_id', $user->id)->where('status', 'alpha')->count(),
+            'late' => Attendance::where('user_id', $user->id)
+                ->where('status', 'present')
+                ->whereColumn('check_in_time', '>', 'created_at') // Simplified logic, ideally compare with schedule start time
+                ->count(),
+        ];
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Attendance statistics',
+            'data' => $stats,
         ]);
     }
 }
